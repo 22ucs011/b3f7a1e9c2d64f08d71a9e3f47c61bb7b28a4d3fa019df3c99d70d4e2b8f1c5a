@@ -22,6 +22,20 @@ namespace kizuna::engine
 
     namespace
     {
+        constexpr std::string_view kClauseSelectList = "SELECT list";
+        constexpr std::string_view kClauseAggregate = "SELECT aggregate";
+        constexpr std::string_view kClauseWhere = "WHERE clause";
+        constexpr std::string_view kClauseOrderBy = "ORDER BY clause";
+        constexpr std::string_view kClauseFrom = "FROM clause";
+        constexpr std::string_view kClauseJoin = "JOIN clause";
+        constexpr std::string_view kClauseJoinCondition = "JOIN condition";
+        constexpr std::string_view kClauseInsertTarget = "INSERT target";
+        constexpr std::string_view kClauseInsertColumns = "INSERT column list";
+        constexpr std::string_view kClauseUpdateTarget = "UPDATE target";
+        constexpr std::string_view kClauseUpdateSet = "SET clause";
+        constexpr std::string_view kClauseDeleteTarget = "DELETE target";
+        constexpr std::string_view kClauseTruncateTarget = "TRUNCATE target";
+
         std::string join_strings(const std::vector<std::string> &items, std::string_view delimiter)
         {
             std::ostringstream oss;
@@ -251,7 +265,7 @@ namespace kizuna::engine
     {
         auto table_opt = catalog_.get_table(stmt.table_name);
         if (!table_opt)
-            throw QueryException::table_not_found(stmt.table_name);
+            throw QueryException::table_not_found(stmt.table_name, kClauseInsertTarget);
         const auto table_entry = *table_opt;
         auto columns = catalog_.get_columns(table_entry.table_id);
         if (columns.empty())
@@ -282,7 +296,7 @@ namespace kizuna::engine
         {
             if (row.values.size() != column_names.size())
                 throw QueryException::invalid_constraint("row value count mismatch");
-            auto payload = encode_row(columns, row, column_names);
+            auto payload = encode_row(columns, row, column_names, table_entry.name);
             auto row_values = decode_row_values(columns, payload);
             auto location = heap.insert(payload);
             record_id_t record_id = make_record_id(location);
@@ -306,11 +320,11 @@ namespace kizuna::engine
         SelectResult result;
 
         const sql::TableRef base_ref = !stmt.from.table_name.empty() ? stmt.from : sql::TableRef{stmt.table_name, {}};
-        auto bind_table = [&](const sql::TableRef &ref) -> BoundTable
+        auto bind_table = [&](const sql::TableRef &ref, std::string_view clause) -> BoundTable
         {
             auto table_opt = catalog_.get_table(ref.table_name);
             if (!table_opt)
-                throw QueryException::table_not_found(ref.table_name);
+                throw QueryException::table_not_found(ref.table_name, clause);
             BoundTable bound;
             bound.table = *table_opt;
             bound.columns = catalog_.get_columns(bound.table.table_id);
@@ -321,10 +335,10 @@ namespace kizuna::engine
         };
 
         std::vector<BoundTable> tables;
-        tables.push_back(bind_table(base_ref));
+        tables.push_back(bind_table(base_ref, kClauseFrom));
         for (const auto &join : stmt.joins)
         {
-            tables.push_back(bind_table(join.table));
+            tables.push_back(bind_table(join.table, kClauseJoin));
         }
 
         std::vector<BoundColumn> bound_columns;
@@ -388,7 +402,7 @@ namespace kizuna::engine
         bool last_direction = true;
         for (const auto &term : stmt.order_by)
         {
-            auto resolved = full_evaluator.resolve_column(term.column);
+            auto resolved = full_evaluator.resolve_column(term.column, kClauseOrderBy);
             const auto &bound = bound_columns[resolved.index];
             order_terms.push_back(OrderTerm{resolved.index, term.ascending, bound.column.column_id});
             if (term.ascending)
@@ -534,7 +548,7 @@ namespace kizuna::engine
                 TableHeap heap(pm_, tbl.table.root_page_id);
                 auto process_row = [&](std::vector<Value> values)
                 {
-                    if (predicate && !is_true(full_evaluator.evaluate_predicate(*predicate, values)))
+                    if (predicate && !is_true(full_evaluator.evaluate_predicate(*predicate, values, kClauseWhere)))
                         return;
                     filtered_rows.push_back(std::move(values));
                 };
@@ -621,7 +635,7 @@ namespace kizuna::engine
                         merged.reserve(left.size() + right.size());
                         merged.insert(merged.end(), left.begin(), left.end());
                         merged.insert(merged.end(), right.begin(), right.end());
-                        if (!condition || is_true(join_evaluator.evaluate_predicate(*condition, merged)))
+                        if (!condition || is_true(join_evaluator.evaluate_predicate(*condition, merged, kClauseJoinCondition)))
                         {
                             next_rows.push_back(std::move(merged));
                         }
@@ -637,7 +651,7 @@ namespace kizuna::engine
             {
                 for (auto &row : combined_rows)
                 {
-                    if (is_true(full_evaluator.evaluate_predicate(*predicate, row)))
+                    if (is_true(full_evaluator.evaluate_predicate(*predicate, row, kClauseWhere)))
                         filtered_rows.push_back(std::move(row));
                 }
             }
@@ -761,7 +775,7 @@ namespace kizuna::engine
     {
         auto table_opt = catalog_.get_table(stmt.table_name);
         if (!table_opt)
-            throw QueryException::table_not_found(stmt.table_name);
+            throw QueryException::table_not_found(stmt.table_name, kClauseDeleteTarget);
         const auto table_entry = *table_opt;
         auto index_contexts = load_table_indexes(table_entry.table_id);
         std::vector<std::unique_ptr<index::IndexHandle>> index_handles;
@@ -826,7 +840,7 @@ namespace kizuna::engine
                 if (!heap.read(loc, payload))
                     continue;
                 auto values = decode_row_values(columns, payload);
-                if (predicate && !is_true(evaluator.evaluate_predicate(*predicate, values)))
+                if (predicate && !is_true(evaluator.evaluate_predicate(*predicate, values, kClauseWhere)))
                     continue;
                 remove_row(loc, values);
             }
@@ -836,7 +850,7 @@ namespace kizuna::engine
             heap.scan([&](const TableHeap::RowLocation &loc, const std::vector<uint8_t> &payload)
                       {
                 auto values = decode_row_values(columns, payload);
-                if (predicate && !is_true(evaluator.evaluate_predicate(*predicate, values)))
+                if (predicate && !is_true(evaluator.evaluate_predicate(*predicate, values, kClauseWhere)))
                     return;
                 remove_row(loc, values); });
         }
@@ -851,7 +865,7 @@ namespace kizuna::engine
 
         auto table_opt = catalog_.get_table(stmt.table_name);
         if (!table_opt)
-            throw QueryException::table_not_found(stmt.table_name);
+            throw QueryException::table_not_found(stmt.table_name, kClauseUpdateTarget);
         const auto table_entry = *table_opt;
         auto index_contexts = load_table_indexes(table_entry.table_id);
         std::vector<std::unique_ptr<index::IndexHandle>> index_handles;
@@ -907,7 +921,7 @@ namespace kizuna::engine
         auto collect_target = [&](const TableHeap::RowLocation &loc, const std::vector<uint8_t> &payload)
         {
             auto current_values = decode_row_values(columns, payload);
-            if (predicate && !is_true(evaluator.evaluate_predicate(*predicate, current_values)))
+            if (predicate && !is_true(evaluator.evaluate_predicate(*predicate, current_values, kClauseWhere)))
                 return;
             targets.push_back(UpdateTarget{loc, std::move(current_values)});
         };
@@ -938,10 +952,10 @@ namespace kizuna::engine
             {
                 auto it = column_index.find(assignment.column_name);
                 if (it == column_index.end())
-                    throw QueryException::column_not_found(assignment.column_name, stmt.table_name);
+                    throw QueryException::column_not_found(assignment.column_name, stmt.table_name, kClauseUpdateSet);
 
                 std::size_t idx = it->second;
-                Value evaluated = evaluator.evaluate_scalar(*assignment.value, current_values);
+                Value evaluated = evaluator.evaluate_scalar(*assignment.value, current_values, kClauseUpdateSet);
                 Value coerced = coerce_value_for_column(columns[idx], evaluated);
                 new_values[idx] = coerced;
             }
@@ -976,7 +990,7 @@ namespace kizuna::engine
     {
         auto table_opt = catalog_.get_table(stmt.table_name);
         if (!table_opt)
-            throw QueryException::table_not_found(stmt.table_name);
+            throw QueryException::table_not_found(stmt.table_name, kClauseTruncateTarget);
         const auto table_entry = *table_opt;
 
         TableHeap heap(pm_, table_entry.root_page_id);
@@ -1395,7 +1409,7 @@ namespace kizuna::engine
                     return false;
                 }
 
-                std::size_t column_index = find_column_index(columns, table_name, column_expr->column);
+                std::size_t column_index = find_column_index(columns, table_name, column_expr->column, kClauseWhere);
                 const auto &column_entry = columns[column_index];
                 Value literal_value = literal_to_value_for_column(column_entry, literal_expr->literal);
                 if (literal_value.is_null())
@@ -1792,7 +1806,7 @@ namespace kizuna::engine
                 break;
             case sql::SelectItemKind::COLUMN:
             {
-                auto resolved = resolver.resolve_column(item.column);
+                auto resolved = resolver.resolve_column(item.column, kClauseSelectList);
                 projection.push_back(resolved.index);
                 if (qualify_names)
                 {
@@ -1822,7 +1836,8 @@ namespace kizuna::engine
         {
             if (!call.column.has_value())
                 throw QueryException::invalid_constraint(std::string(operation) + " requires a column reference");
-            return resolver.resolve_column(*call.column);
+            std::string clause = std::string(kClauseAggregate) + " (" + operation + ")";
+            return resolver.resolve_column(*call.column, clause);
         };
 
         switch (call.function)
@@ -2003,22 +2018,24 @@ namespace kizuna::engine
 
     std::size_t DMLExecutor::find_column_index(const std::vector<catalog::ColumnCatalogEntry> &columns,
                                                const std::string &table_name,
-                                               const sql::ColumnRef &ref) const
+                                               const sql::ColumnRef &ref,
+                                               std::string_view clause) const
     {
         if (!ref.table.empty() && ref.table != table_name)
-            throw QueryException::column_not_found(ref.column, ref.table);
+            throw QueryException::column_not_found(ref.column, ref.table, clause);
 
         for (std::size_t i = 0; i < columns.size(); ++i)
         {
             if (columns[i].column.name == ref.column)
                 return i;
         }
-        throw QueryException::column_not_found(ref.column, table_name);
+        throw QueryException::column_not_found(ref.column, table_name, clause);
     }
 
     std::vector<uint8_t> DMLExecutor::encode_row(const std::vector<catalog::ColumnCatalogEntry> &columns,
                                                  const sql::InsertRow &row,
-                                                 const std::vector<std::string> &column_names)
+                                                 const std::vector<std::string> &column_names,
+                                                 std::string_view table_name)
     {
         std::unordered_map<std::string, const sql::LiteralValue *> value_lookup;
         value_lookup.reserve(column_names.size());
@@ -2035,7 +2052,7 @@ namespace kizuna::engine
             const auto &col = entry.column;
             auto it = value_lookup.find(col.name);
             if (it == value_lookup.end())
-                throw QueryException::column_not_found(col.name, col.name);
+                throw QueryException::column_not_found(col.name, table_name, kClauseInsertColumns);
 
             const sql::LiteralValue &literal = *(it->second);
             record::Field field;

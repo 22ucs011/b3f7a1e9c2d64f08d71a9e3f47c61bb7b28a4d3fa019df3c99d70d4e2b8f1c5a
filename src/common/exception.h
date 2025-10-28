@@ -339,11 +339,18 @@ namespace kizuna
 
         static QueryException table_not_found(
             std::string_view table_name,
+            std::string_view clause = "",
             const std::source_location &location = std::source_location::current()) noexcept;
 
         static QueryException column_not_found(
             std::string_view column_name,
             std::string_view table_name = "",
+            std::string_view clause = "",
+            const std::source_location &location = std::source_location::current()) noexcept;
+
+        static QueryException ambiguous_column(
+            std::string_view column_name,
+            std::string_view clause = "",
             const std::source_location &location = std::source_location::current()) noexcept;
 
         static QueryException type_error(

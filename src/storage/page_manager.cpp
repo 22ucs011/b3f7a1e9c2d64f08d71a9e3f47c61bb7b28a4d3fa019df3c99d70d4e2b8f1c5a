@@ -54,6 +54,7 @@ namespace kizuna
         fr.dirty = true;
         flush(id);
         fr.dirty = false;
+        unpin(id, /*dirty*/ false);
         return id;
     }
 

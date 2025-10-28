@@ -59,6 +59,12 @@ add_executable(kizuna
 )
 target_link_libraries(kizuna PRIVATE kizuna_common)
 
+add_executable(kizuna_index_benchmark
+    ${SOURCE_DIR}/perf/index_benchmark.cpp
+)
+target_link_libraries(kizuna_index_benchmark PRIVATE kizuna_common)
+target_include_directories(kizuna_index_benchmark PRIVATE ${SOURCE_DIR})
+
 # Status output
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "C++ Standard: ${CMAKE_CXX_STANDARD}")

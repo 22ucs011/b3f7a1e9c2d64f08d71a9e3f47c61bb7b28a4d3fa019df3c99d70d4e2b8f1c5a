@@ -69,6 +69,7 @@ namespace kizuna::index
         void set_type(NodeType type) noexcept { type_ = type; }
 
         size_t key_count() const noexcept;
+        bool requires_split() const noexcept;
 
     private:
         static constexpr size_t HeaderSize();

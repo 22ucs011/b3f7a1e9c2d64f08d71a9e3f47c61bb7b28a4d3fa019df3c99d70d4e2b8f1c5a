@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -76,7 +77,8 @@ namespace kizuna::engine
         static record_id_t make_record_id(const TableHeap::RowLocation &loc);
         std::vector<uint8_t> encode_row(const std::vector<catalog::ColumnCatalogEntry> &columns,
                                         const sql::InsertRow &row,
-                                        const std::vector<std::string> &column_names);
+                                        const std::vector<std::string> &column_names,
+                                        std::string_view table_name);
         std::vector<uint8_t> encode_values(const std::vector<catalog::ColumnCatalogEntry> &columns,
                                            const std::vector<Value> &values) const;
         Value coerce_value_for_column(const catalog::ColumnCatalogEntry &column,
@@ -102,7 +104,8 @@ namespace kizuna::engine
                                              std::vector<std::string> &out_names) const;
         std::size_t find_column_index(const std::vector<catalog::ColumnCatalogEntry> &columns,
                                       const std::string &table_name,
-                                      const sql::ColumnRef &ref) const;
+                                      const sql::ColumnRef &ref,
+                                      std::string_view clause) const;
 
         Value evaluate_aggregate(const sql::AggregateCall &call,
                                  const ExpressionEvaluator &resolver,

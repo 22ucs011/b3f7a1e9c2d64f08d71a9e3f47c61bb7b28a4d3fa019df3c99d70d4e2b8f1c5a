@@ -6,6 +6,12 @@ Kizuna is a lightweight, teaching-focused DBMS written in modern C++ (C++20). V0
 
 - **Storage Core (V0.1)**: fixed-size paged file manager, slotted data pages, buffer pool with LRU, SQLite-style freelist trunks, typed record encode/decode, structured exceptions, logger, and REPL scaffolding.
 - **Catalog & DDL (V0.2)**: persistent table/column catalog, SQL lexer/parser for CREATE/DROP TABLE, DDL executor wiring, REPL schema inspection and DROP IF EXISTS UX.
+- **SQL DML (V0.3)**:
+  - Null-bitmap record format with overflow-aware heap pages and BOOLEAN end-to-end support.
+  - Table heap abstraction handling inserts, slot iteration, tombstone deletes, and fast truncate flows.
+  - Baseline DML parser/AST/executor for `INSERT`, `SELECT *`, `DELETE` (without WHERE), and `TRUNCATE`, wired through the catalog.
+  - REPL integration that routes DML commands, prints tabular SELECT output, and surfaces result counts/status.
+  - Storage, parser, and executor unit tests covering FR-012..FR-016 scenarios.
 - **SQL DML (V0.4)**:
   - Expression-aware parser for projection lists, WHERE comparisons/logicals, UPDATE assignments, and LIMIT clauses.
   - DML executor with predicate pushdown, projection materialisation, typed UPDATE/DELETE, and LIMIT enforcement.
@@ -46,6 +52,12 @@ Prereqs: CMake 3.10+, a C++20 compiler (MSVC 2022, GCC 11+, Clang 13+).
 - REPL: `build-msvc\Debug\kizuna.exe` (Windows) or `./build/kizuna` (POSIX).
 
 See `docs/DEMO.md` for an end-to-end walkthrough that exercises the SQL pipeline.
+
+## Benchmark Snapshot (Ao5)
+
+- **Heap scans (no index)**: 1k rows `22.58 ms`, 10k rows `224.28 ms`, 100k rows `2531.09 ms`.
+- **Indexed equality lookups**: 1k rows `4.80 ms` average (median `0.793 ms`), 10k rows `10.72 ms` average (median `7.27 ms`), 100k rows `64.92 ms` average (median `49.83 ms`).
+- Measurements captured with `kizuna_index_benchmark` using average-of-five runs after discarding the cold-start outlier.
 
 ## SQL Quick Reference
 
@@ -94,4 +106,3 @@ Additional REPL helpers: `show tables`, `schema <table>`, `loglevel <level>`
 - All runtime assets are created beside the executable under `database/` (catalog, data, indexes, logs, temp, backup).
 - Page 1 is reserved for catalog metadata; data pages start at ID 2 and the freelist uses SQLite-style trunks.
 - Indexes currently support equality and range scans on single-column keys; ORDER BY reuses matching indexes or falls back to a stable in-memory sort. Multi-column ordering, DISTINCT, aggregates, and INNER JOIN operate via the SELECT executor.
-- No WAL/concurrency yet, future releases will build on this foundation.

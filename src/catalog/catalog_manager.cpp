@@ -79,19 +79,16 @@ namespace kizuna::catalog
         {
             tables_root_ = pm_.new_page(PageType::DATA);
             pm_.set_catalog_tables_root(tables_root_);
-            pm_.unpin(tables_root_, false);
         }
         if (columns_root_ < config::FIRST_PAGE_ID)
         {
             columns_root_ = pm_.new_page(PageType::DATA);
             pm_.set_catalog_columns_root(columns_root_);
-            pm_.unpin(columns_root_, false);
         }
         if (indexes_root_ < config::FIRST_PAGE_ID)
         {
             indexes_root_ = pm_.new_page(PageType::DATA);
             pm_.set_catalog_indexes_root(indexes_root_);
-            pm_.unpin(indexes_root_, false);
         }
     }
 

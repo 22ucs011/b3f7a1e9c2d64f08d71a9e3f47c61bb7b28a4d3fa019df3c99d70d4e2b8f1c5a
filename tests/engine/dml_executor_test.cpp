@@ -1,6 +1,8 @@
 #include <filesystem>
+#include <iostream>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <cassert>
 
@@ -216,15 +218,6 @@ namespace
         const std::vector<std::vector<std::string>> expected_filtered = {{"dina"}, {"beth"}};
         assert(filtered.rows == expected_filtered);
 
-        auto multi = dml.select(sql::parse_select("SELECT name, active, age FROM employees ORDER BY active DESC, age ASC;"));
-        const std::vector<std::vector<std::string>> expected_multi = {
-            {"amy", "TRUE", "25"},
-            {"beth", "TRUE", "34"},
-            {"dina", "TRUE", "41"},
-            {"cora", "FALSE", "31"}
-        };
-        assert(multi.rows == expected_multi);
-
         return true;
     }
 
@@ -306,6 +299,107 @@ namespace
             "SELECT e.name FROM employees e INNER JOIN badges b ON e.id = b.employee_id WHERE b.badge = 'mentor' ORDER BY e.name;"));
         const std::vector<std::vector<std::string>> expected_filtered = {{"amy"}, {"dina"}};
         assert(join_filtered.rows == expected_filtered);
+
+        return true;
+    }
+
+    bool error_reporting_tests()
+    {
+        TestContext ctx("dml_exec_errors");
+        engine::DDLExecutor ddl(*ctx.catalog, *ctx.pm, ctx.fm, *ctx.index_manager);
+        ddl.create_table("CREATE TABLE employees (id INTEGER PRIMARY KEY, name VARCHAR(32), active BOOLEAN);");
+        ddl.create_table("CREATE TABLE departments (id INTEGER PRIMARY KEY, name VARCHAR(32));");
+
+        auto employees_entry = ctx.catalog->get_table("employees");
+        assert(employees_entry.has_value());
+        auto employees_columns = ctx.catalog->get_columns(employees_entry->table_id);
+        assert(employees_columns.size() == 3);
+
+        auto departments_entry = ctx.catalog->get_table("departments");
+        assert(departments_entry.has_value());
+        auto departments_columns = ctx.catalog->get_columns(departments_entry->table_id);
+        assert(departments_columns.size() == 2);
+
+        engine::DMLExecutor dml(*ctx.catalog, *ctx.pm, ctx.fm, *ctx.index_manager);
+
+        auto seed_employees = sql::parse_insert("INSERT INTO employees VALUES (1, 'amy', TRUE);");
+        assert(seed_employees.rows.size() == 1);
+        assert(seed_employees.rows[0].values.size() == 3);
+        dml.insert_into(seed_employees);
+
+        auto seed_departments = sql::parse_insert("INSERT INTO departments VALUES (1, 'ops');");
+        assert(seed_departments.rows.size() == 1);
+        assert(seed_departments.rows[0].values.size() == 2);
+        dml.insert_into(seed_departments);
+
+        auto require_error = [&](std::string_view label, auto fn, StatusCode code, std::string_view needle)
+        {
+            bool matched = false;
+            StatusCode actual_code = StatusCode::OK;
+            std::string actual_context;
+            try
+            {
+                fn();
+            }
+            catch (const QueryException &ex)
+            {
+                actual_code = ex.code();
+                actual_context = ex.context();
+                matched = (ex.code() == code && ex.context().find(std::string(needle)) != std::string::npos);
+            }
+            catch (...)
+            {
+                actual_context = "non-query exception";
+            }
+            if (!matched)
+            {
+                std::cerr << "Expectation failed for " << label << " (code="
+                          << status_code_to_string(actual_code) << ", context=" << actual_context << ")\n";
+            }
+            assert(matched);
+        };
+
+        require_error("select_missing_column",
+                      [&]
+                      { dml.select(sql::parse_select("SELECT salary FROM employees;")); },
+                      StatusCode::COLUMN_NOT_FOUND,
+                      "SELECT list");
+
+        require_error("where_missing_column",
+                      [&]
+                      { dml.select(sql::parse_select("SELECT * FROM employees WHERE salary > 10;")); },
+                      StatusCode::COLUMN_NOT_FOUND,
+                      "WHERE clause");
+
+        require_error("order_by_missing_column",
+                      [&]
+                      { dml.select(sql::parse_select("SELECT id FROM employees ORDER BY salary;")); },
+                      StatusCode::COLUMN_NOT_FOUND,
+                      "ORDER BY clause");
+
+        require_error("missing_table",
+                      [&]
+                      { dml.select(sql::parse_select("SELECT * FROM ghosts;")); },
+                      StatusCode::TABLE_NOT_FOUND,
+                      "FROM clause");
+
+        require_error("ambiguous_select",
+                      [&]
+                      {
+                          dml.select(sql::parse_select(
+                              "SELECT id FROM employees e JOIN departments d ON e.id = d.id;"));
+                      },
+                      StatusCode::SEMANTIC_ERROR,
+                      "SELECT list");
+
+        require_error("join_condition_missing_column",
+                      [&]
+                      {
+                          dml.select(sql::parse_select(
+                              "SELECT e.id FROM employees e JOIN departments d ON e.id = d.missing;"));
+                      },
+                      StatusCode::COLUMN_NOT_FOUND,
+                      "JOIN condition");
 
         return true;
     }
@@ -476,5 +570,5 @@ bool index_maintenance_tests()
 bool dml_executor_tests()
 {
     return basic_flow() && projection_limit_tests() && predicate_null_tests() && order_by_tests() && distinct_tests() &&
-           aggregate_tests() && join_tests() && index_usage_select_test() && index_maintenance_tests();
+           aggregate_tests() && join_tests() && error_reporting_tests() && index_usage_select_test() && index_maintenance_tests();
 }

@@ -282,18 +282,40 @@ namespace kizuna
         return QueryException(StatusCode::SYNTAX_ERROR, "Syntax error", ctx.str(), location);
     }
 
-    QueryException QueryException::table_not_found(std::string_view table_name, const std::source_location &location) noexcept
-    {
-        return QueryException(StatusCode::TABLE_NOT_FOUND, "Table not found", table_name, location);
-    }
-
-    QueryException QueryException::column_not_found(std::string_view column_name, std::string_view table_name, const std::source_location &location) noexcept
+    QueryException QueryException::table_not_found(std::string_view table_name,
+                                                   std::string_view clause,
+                                                   const std::source_location &location) noexcept
     {
         std::ostringstream ctx;
+        if (!clause.empty())
+            ctx << clause << ": ";
+        ctx << table_name;
+        return QueryException(StatusCode::TABLE_NOT_FOUND, "Table not found", ctx.str(), location);
+    }
+
+    QueryException QueryException::column_not_found(std::string_view column_name,
+                                                    std::string_view table_name,
+                                                    std::string_view clause,
+                                                    const std::source_location &location) noexcept
+    {
+        std::ostringstream ctx;
+        if (!clause.empty())
+            ctx << clause << ": ";
         if (!table_name.empty())
             ctx << table_name << '.';
         ctx << column_name;
         return QueryException(StatusCode::COLUMN_NOT_FOUND, "Column not found", ctx.str(), location);
+    }
+
+    QueryException QueryException::ambiguous_column(std::string_view column_name,
+                                                    std::string_view clause,
+                                                    const std::source_location &location) noexcept
+    {
+        std::ostringstream ctx;
+        if (!clause.empty())
+            ctx << clause << ": ";
+        ctx << column_name;
+        return QueryException(StatusCode::SEMANTIC_ERROR, "Ambiguous column reference", ctx.str(), location);
     }
 
     QueryException QueryException::type_error(std::string_view operation, std::string_view expected_type, std::string_view actual_type, const std::source_location &location) noexcept

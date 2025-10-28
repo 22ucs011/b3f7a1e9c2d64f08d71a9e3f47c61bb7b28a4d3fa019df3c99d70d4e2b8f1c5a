@@ -46,6 +46,48 @@ namespace kizuna::index
         return (type_ == NodeType::LEAF) ? leaf_entries_.size() : internal_entries_.size();
     }
 
+    bool BPlusTreeNode::requires_split() const noexcept
+    {
+        const size_t keys = key_count();
+        if (keys == 0)
+            return false;
+        if (keys > config::BTREE_MAX_KEYS)
+            return true;
+
+        size_t key_bytes = 0;
+        if (type_ == NodeType::LEAF)
+        {
+            for (const auto &entry : leaf_entries_)
+                key_bytes += entry.key.size();
+        }
+        else
+        {
+            for (const auto &entry : internal_entries_)
+                key_bytes += entry.key.size();
+        }
+
+        size_t pos = kPageHeaderSize + HeaderSize();
+        if (type_ == NodeType::LEAF)
+        {
+            pos += keys * sizeof(record_id_t);
+        }
+        else
+        {
+            pos += children_.size() * sizeof(page_id_t);
+        }
+
+        if (pos > Page::page_size())
+            return true;
+
+        pos += keys * sizeof(uint16_t);
+        if (pos > Page::page_size())
+            return true;
+
+        const size_t available = Page::page_size() - pos;
+        const size_t required = key_bytes + keys * sizeof(uint16_t);
+        return required > available;
+    }
+
     BPlusTreeNode::RawHeader BPlusTreeNode::ReadHeader(const Page &page)
     {
         if (static_cast<PageType>(page.header().page_type) != PageType::INDEX)

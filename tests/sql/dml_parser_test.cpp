@@ -153,6 +153,45 @@ static void check_join_without_inner_keyword()
     assert(select.joins[0].condition != nullptr);
 }
 
+static void check_select_complex_where()
+{
+    auto select = sql::parse_select("SELECT id FROM users WHERE (active AND (age > 30 OR dept = 'r&d')) AND NOT archived;");
+    assert(select.where != nullptr);
+    assert(select.where->kind == sql::ExpressionKind::BINARY);
+    assert(select.where->binary_op == sql::BinaryOperator::AND);
+    assert(select.where->left->kind == sql::ExpressionKind::BINARY);
+    assert(select.where->right->kind == sql::ExpressionKind::UNARY);
+}
+
+static void check_multi_join_chain()
+{
+    auto select = sql::parse_select(
+        "SELECT u.id FROM users u JOIN accounts a ON u.id = a.user_id JOIN ledger l ON a.id = l.account_id WHERE l.balance > 0;");
+    assert(select.joins.size() == 2);
+    assert(select.joins[0].table.alias == "a");
+    assert(select.joins[1].table.alias == "l");
+    assert(select.joins[1].condition != nullptr);
+    assert(select.where != nullptr);
+}
+
+static void check_nested_select_error()
+{
+    bool caught = false;
+    try
+    {
+        (void)sql::parse_select("SELECT (SELECT id FROM inner_table) FROM outer_table;");
+    }
+    catch (const DBException &ex)
+    {
+        caught = (ex.code() == StatusCode::SYNTAX_ERROR);
+    }
+    catch (...)
+    {
+        caught = true;
+    }
+    assert(caught);
+}
+
 static void check_insert_variants()
 {
     auto insert = sql::parse_insert("INSERT INTO users (id, name, active) VALUES (1, 'alice', TRUE), (2, 'bob', FALSE);");
@@ -211,11 +250,14 @@ bool sql_dml_parser_tests()
     check_select_aggregates();
     check_join_parse();
     check_join_without_inner_keyword();
+    check_select_complex_where();
+    check_multi_join_chain();
     check_delete_where();
     check_update_parse();
     check_truncate();
     check_parse_dml_switch();
     check_invalid_count_distinct_star();
+    check_nested_select_error();
 
     bool caught = false;
     try

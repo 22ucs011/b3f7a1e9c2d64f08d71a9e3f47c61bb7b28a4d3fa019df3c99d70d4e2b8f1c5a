@@ -3,6 +3,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -35,12 +36,15 @@ namespace kizuna::engine
         explicit ExpressionEvaluator(const std::vector<BindingEntry> &bindings);
 
         Value evaluate_scalar(const sql::Expression &expression,
-                              const std::vector<Value> &row_values) const;
+                              const std::vector<Value> &row_values,
+                              std::string_view clause = "") const;
 
         TriBool evaluate_predicate(const sql::Expression &expression,
-                                   const std::vector<Value> &row_values) const;
+                                   const std::vector<Value> &row_values,
+                                   std::string_view clause = "") const;
 
-        ResolvedColumn resolve_column(const sql::ColumnRef &ref) const;
+        ResolvedColumn resolve_column(const sql::ColumnRef &ref,
+                                      std::string_view clause = "") const;
 
     private:
         struct ColumnBinding
@@ -54,13 +58,15 @@ namespace kizuna::engine
         std::unordered_map<std::string, ColumnBinding> column_map_;
 
         void register_binding_key(const std::string &key, std::size_t index, DataType type);
-        const ColumnBinding *lookup_column(const sql::ColumnRef &ref) const;
+        const ColumnBinding *lookup_column(const sql::ColumnRef &ref, std::string_view clause) const;
         Value literal_to_value(const sql::LiteralValue &literal, std::optional<DataType> target_type) const;
         Value evaluate_value(const sql::Expression &expression,
                              const std::vector<Value> &row_values,
-                             std::optional<DataType> target_hint) const;
+                             std::optional<DataType> target_hint,
+                             std::string_view clause) const;
         TriBool evaluate_predicate_internal(const sql::Expression &expression,
-                                            const std::vector<Value> &row_values) const;
+                                            const std::vector<Value> &row_values,
+                                            std::string_view clause) const;
         Value coerce_to_type(const Value &value, DataType target) const;
     };
 }

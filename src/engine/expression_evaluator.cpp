@@ -90,15 +90,17 @@ namespace kizuna::engine
         }
     }
 
-    const ExpressionEvaluator::ColumnBinding *ExpressionEvaluator::lookup_column(const sql::ColumnRef &ref) const
+    const ExpressionEvaluator::ColumnBinding *ExpressionEvaluator::lookup_column(const sql::ColumnRef &ref,
+                                                                                std::string_view clause) const
     {
         if (!ref.table.empty())
         {
-            auto it = column_map_.find(ref.table + "." + ref.column);
+            const std::string qualified = ref.table + "." + ref.column;
+            auto it = column_map_.find(qualified);
             if (it != column_map_.end())
             {
                 if (it->second.ambiguous)
-                    throw QueryException::invalid_constraint("Ambiguous column reference '" + ref.table + "." + ref.column + "'");
+                    throw QueryException::ambiguous_column(qualified, clause);
                 return &it->second;
             }
         }
@@ -106,17 +108,18 @@ namespace kizuna::engine
         if (it != column_map_.end())
         {
             if (it->second.ambiguous)
-                throw QueryException::invalid_constraint("Ambiguous column reference '" + ref.column + "'");
+                throw QueryException::ambiguous_column(ref.column, clause);
             return &it->second;
         }
         return nullptr;
     }
 
-    ExpressionEvaluator::ResolvedColumn ExpressionEvaluator::resolve_column(const sql::ColumnRef &ref) const
+    ExpressionEvaluator::ResolvedColumn ExpressionEvaluator::resolve_column(const sql::ColumnRef &ref,
+                                                                            std::string_view clause) const
     {
-        const auto *binding = lookup_column(ref);
+        const auto *binding = lookup_column(ref, clause);
         if (!binding)
-            throw QueryException::column_not_found(ref.column, ref.table);
+            throw QueryException::column_not_found(ref.column, ref.table, clause);
         return ResolvedColumn{binding->index, binding->type};
     }
 
@@ -203,7 +206,8 @@ namespace kizuna::engine
 
     Value ExpressionEvaluator::evaluate_value(const sql::Expression &expression,
                                               const std::vector<Value> &row_values,
-                                              std::optional<DataType> target_hint) const
+                                              std::optional<DataType> target_hint,
+                                              std::string_view clause) const
     {
         switch (expression.kind)
         {
@@ -211,9 +215,9 @@ namespace kizuna::engine
             return literal_to_value(expression.literal, target_hint);
         case sql::ExpressionKind::COLUMN_REF:
         {
-            const auto *binding = lookup_column(expression.column);
+            const auto *binding = lookup_column(expression.column, clause);
             if (!binding)
-                throw QueryException::column_not_found(expression.column.column, expression.column.table);
+                throw QueryException::column_not_found(expression.column.column, expression.column.table, clause);
             if (binding->index >= row_values.size())
                 throw DBException(StatusCode::SCHEMA_MISMATCH, "Row does not contain column", expression.column.column);
             return row_values[binding->index];
@@ -272,13 +276,15 @@ namespace kizuna::engine
     }
 
     Value ExpressionEvaluator::evaluate_scalar(const sql::Expression &expression,
-                                               const std::vector<Value> &row_values) const
+                                               const std::vector<Value> &row_values,
+                                               std::string_view clause) const
     {
-        return evaluate_value(expression, row_values, std::nullopt);
+        return evaluate_value(expression, row_values, std::nullopt, clause);
     }
 
     TriBool ExpressionEvaluator::evaluate_predicate_internal(const sql::Expression &expression,
-                                                             const std::vector<Value> &row_values) const
+                                                             const std::vector<Value> &row_values,
+                                                             std::string_view clause) const
     {
         switch (expression.kind)
         {
@@ -286,38 +292,38 @@ namespace kizuna::engine
             return value_to_tristate(literal_to_value(expression.literal, std::nullopt));
         case sql::ExpressionKind::COLUMN_REF:
         {
-            const auto *binding = lookup_column(expression.column);
+            const auto *binding = lookup_column(expression.column, clause);
             if (!binding)
-                throw QueryException::column_not_found(expression.column.column, expression.column.table);
+                throw QueryException::column_not_found(expression.column.column, expression.column.table, clause);
             if (binding->index >= row_values.size())
                 throw DBException(StatusCode::SCHEMA_MISMATCH, "Row does not contain column", expression.column.column);
             return value_to_tristate(row_values[binding->index]);
         }
         case sql::ExpressionKind::UNARY:
         {
-            auto operand = evaluate_predicate_internal(*expression.left, row_values);
+            auto operand = evaluate_predicate_internal(*expression.left, row_values, clause);
             return logical_not(operand);
         }
         case sql::ExpressionKind::BINARY:
         {
             if (expression.binary_op == sql::BinaryOperator::AND)
             {
-                auto lhs = evaluate_predicate_internal(*expression.left, row_values);
-                auto rhs = evaluate_predicate_internal(*expression.right, row_values);
+                auto lhs = evaluate_predicate_internal(*expression.left, row_values, clause);
+                auto rhs = evaluate_predicate_internal(*expression.right, row_values, clause);
                 return logical_and(lhs, rhs);
             }
             if (expression.binary_op == sql::BinaryOperator::OR)
             {
-                auto lhs = evaluate_predicate_internal(*expression.left, row_values);
-                auto rhs = evaluate_predicate_internal(*expression.right, row_values);
+                auto lhs = evaluate_predicate_internal(*expression.left, row_values, clause);
+                auto rhs = evaluate_predicate_internal(*expression.right, row_values, clause);
                 return logical_or(lhs, rhs);
             }
 
             const auto *left_binding = expression.left && expression.left->kind == sql::ExpressionKind::COLUMN_REF
-                                           ? lookup_column(expression.left->column)
+                                           ? lookup_column(expression.left->column, clause)
                                            : nullptr;
             const auto *right_binding = expression.right && expression.right->kind == sql::ExpressionKind::COLUMN_REF
-                                            ? lookup_column(expression.right->column)
+                                            ? lookup_column(expression.right->column, clause)
                                             : nullptr;
 
             std::optional<DataType> left_hint;
@@ -327,8 +333,8 @@ namespace kizuna::engine
             if (expression.right && expression.right->kind == sql::ExpressionKind::LITERAL && left_binding)
                 right_hint = left_binding->type;
 
-            auto left_value = evaluate_value(*expression.left, row_values, left_hint);
-            auto right_value = evaluate_value(*expression.right, row_values, right_hint);
+            auto left_value = evaluate_value(*expression.left, row_values, left_hint, clause);
+            auto right_value = evaluate_value(*expression.right, row_values, right_hint, clause);
 
             if (left_binding)
                 left_value = coerce_to_type(left_value, left_binding->type);
@@ -368,7 +374,7 @@ namespace kizuna::engine
         }
         case sql::ExpressionKind::NULL_TEST:
         {
-            auto value = evaluate_value(*expression.left, row_values, std::nullopt);
+            auto value = evaluate_value(*expression.left, row_values, std::nullopt, clause);
             bool is_null = value.is_null();
             bool result = expression.is_not_null ? !is_null : is_null;
             return result ? TriBool::True : TriBool::False;
@@ -378,8 +384,9 @@ namespace kizuna::engine
     }
 
     TriBool ExpressionEvaluator::evaluate_predicate(const sql::Expression &expression,
-                                                   const std::vector<Value> &row_values) const
+                                                    const std::vector<Value> &row_values,
+                                                    std::string_view clause) const
     {
-        return evaluate_predicate_internal(expression, row_values);
+        return evaluate_predicate_internal(expression, row_values, clause);
     }
 }

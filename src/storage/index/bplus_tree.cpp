@@ -252,7 +252,7 @@ namespace kizuna::index
             node.leaf_entries().insert(node.leaf_entries().begin() + idx,
                                        BPlusTreeNode::LeafEntry{key, value});
 
-            if (node.leaf_entries().size() > config::BTREE_MAX_KEYS)
+            if (node.requires_split())
             {
                 BPlusTreeNode new_leaf = BPlusTreeNode::MakeLeaf(pm_.new_page(PageType::INDEX));
                 new_leaf.set_parent(node.parent_page_id());
@@ -298,7 +298,7 @@ namespace kizuna::index
                                         BPlusTreeNode::InternalEntry{*promoted_key, *promoted_child});
         node.children().insert(node.children().begin() + child_index + 1, *promoted_child);
 
-        if (node.internal_entries().size() > config::BTREE_MAX_KEYS)
+        if (node.requires_split())
         {
             BPlusTreeNode new_internal = BPlusTreeNode::MakeInternal(pm_.new_page(PageType::INDEX));
             new_internal.set_parent(node.parent_page_id());

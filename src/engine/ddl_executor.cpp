@@ -127,7 +127,6 @@ namespace kizuna::engine
         def.next_column_id = static_cast<column_id_t>(def.columns.size() + 1);
 
         page_id_t root_page_id = pm_.new_page(PageType::DATA);
-        pm_.unpin(root_page_id, false);
 
         catalog::TableCatalogEntry entry = catalog_.create_table(def, root_page_id, std::string(original_sql));
 
